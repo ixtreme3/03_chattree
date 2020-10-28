@@ -1,114 +1,125 @@
 package com.company;
 
 import java.io.IOException;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
-import java.net.InetAddress;
-import java.net.SocketException;
+import java.net.*;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.Scanner;
 
 public class Node {
-    DatagramSocket socket;
+    private final String myNodeName;
+    private final int myPercentageLoss;
+    private final int myPort;
 
-    private final String nodeName;
-    private final int percentageLoss;
-    private final int port;
+    private final HashMap<String, Integer> nodeNeighbours = new HashMap<>(); // pairs IP / port
 
-    private InetAddress neighbourIp = null;
-    private int neighbourPort;
+    Node(String name, int percentage, int port, String neighbourIp, int neighbourPort) throws SocketException { // connect to somebody / make a neighbour
+        this.myNodeName = name;
+        this.myPercentageLoss = percentage;
+        this.myPort = port;
 
-    Node(String name, int percentage, int port, InetAddress neighbourIp, int neighbourPort) throws SocketException { // connect to somebody/make a neighbour
-        this.nodeName = name;
-        this.percentageLoss = percentage;
-        this.port = port;
-
-        this.neighbourIp = neighbourIp;
-        this.neighbourPort = neighbourPort;
-
-//        socket = new DatagramSocket(port); // Constructs a datagram socket and binds it to the specified port on the local host machine.
-//        socket.connect(neighbourIp, neighbourPort);
+        nodeNeighbours.put(neighbourIp, neighbourPort);
     }
 
     Node(String name, int percentage, int port) throws SocketException { // born detached
-        this.nodeName = name;
-        this.percentageLoss = percentage;
-        this.port = port;
-
-//        socket = new DatagramSocket(port); // Constructs a datagram socket and binds it to the specified port on the local host machine.
+        this.myNodeName = name;
+        this.myPercentageLoss = percentage;
+        this.myPort = port;
     }
 
     private void start(){
-        // Сделать коннект здесь и передать готовый сокет в 2 потока?
-        try (DatagramSocket socket = new DatagramSocket(port)) {
-            if (neighbourIp != null) {
-                socket.connect(neighbourIp, neighbourPort);
-            }
-            Sender sender = new Sender(socket, "");
-            Receiver receiver = new Receiver(socket);
+        try (DatagramSocket socket = new DatagramSocket(myPort)) {
+            Sender sender = new Sender(socket, nodeNeighbours);
+            Receiver receiver = new Receiver(socket, nodeNeighbours);
             new Thread(receiver).start();
             new Thread(sender).start();
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
-
 }
 
 class Sender implements Runnable {
-    public int port = 0;
     private final DatagramSocket socket;
-    private String hostname;
+    final HashMap<String, Integer> nodeNeighbours;
 
-    Sender(DatagramSocket s, String h) {
+    Sender(DatagramSocket s, HashMap<String, Integer> nodeNeighbours) {
         socket = s;
-//        hostname = h;
+        this.nodeNeighbours = nodeNeighbours;
     }
 
-    private void sendMessage(String s) throws Exception {
-        byte[] buf = s.getBytes(StandardCharsets.UTF_8);
-//        InetAddress address = InetAddress.getByName(hostname);
-        DatagramPacket packet = new DatagramPacket(buf, buf.length, address, port);
-        socket.send(packet);
-    }
-
-    public void run() {
-
-    }
-}
-
-class Receiver implements Runnable {
-    DatagramSocket socket;
-    byte[] buf;
-
-    Receiver(DatagramSocket s) {
-        socket = s;
-        buf = new byte[1024];
-    }
-
-    public void run() {
+    private void sendMessages() throws IOException {
+        Scanner scanner = new Scanner(System.in);
         while (true) {
-            DatagramPacket packet = new DatagramPacket(buf, buf.length);
-            try {
-                socket.receive(packet);
-            } catch (IOException e) {
-                e.printStackTrace();
+            String message = scanner.nextLine();
+            byte[] buf = message.getBytes(StandardCharsets.UTF_8);
+            synchronized (nodeNeighbours) { // ??
+                Iterator<Map.Entry<String, Integer>> iterator = nodeNeighbours.entrySet().iterator(); // to change
+                while (iterator.hasNext()) {
+                    Map.Entry<String, Integer> entry = iterator.next();
+                    InetAddress inetAddress = InetAddress.getByName(entry.getKey());
+                    int port = entry.getValue();
+                    DatagramPacket packet = new DatagramPacket(buf, buf.length, inetAddress, port);
+                    socket.send(packet);
+                }
             }
-            String received = new String(packet.getData(), 0, packet.getLength());
-            System.out.println(received);
+        }
+    }
+
+    public void run() {
+        try {
+            sendMessages();
+        } catch (IOException e) {
+            e.printStackTrace();
         }
     }
 }
 
-//
-// 1.
-//
-// 2. При работе с UDP в Java для отправки и получения пакетов используется класс DatagramPacket:
-//  Constructor to send data: DatagramPacket(byte buf[], int length, InetAddress inetAddress, int port)
-//  Constructor to receive the data: DatagramPacket(byte buf[], int length)
-//
-// 3. socket.send(packet) / socket.receive(packet)
-//
-//
+
+class Receiver implements Runnable {
+    DatagramSocket socket;
+    final HashMap<String, Integer> nodeNeighbours;
+    byte[] buf;
+
+    Receiver(DatagramSocket s, HashMap<String, Integer> nodeNeighbours) {
+        socket = s;
+        buf = new byte[1024];
+        this.nodeNeighbours = nodeNeighbours;
+    }
+
+    private boolean isConnectionRequest(String message){
+        // some logic
+        return false;
+    }
+
+    private void handleRequest(String str){
+        synchronized (nodeNeighbours){
+            // some logic
+        }
+    }
+
+    private void receiveMessage() throws IOException {
+        while(true) {
+            DatagramPacket packet = new DatagramPacket(buf, buf.length);
+            socket.receive(packet);
+            String receivedMessage = new String(packet.getData(), 0, packet.getLength());
+            if (isConnectionRequest(receivedMessage)){
+                handleRequest("");
+            } else System.out.println(receivedMessage);
+        }
+    }
+
+    public void run() {
+        try {
+            receiveMessage();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+}
+
 
 
 
