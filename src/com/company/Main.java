@@ -4,7 +4,7 @@ import java.net.SocketException;
 
 public class Main {
     public static void main(String[] args) throws SocketException {
-        System.out.println("Hello world");
-        Node node = new Node("test",0,0);
+        Node node = new Node("test",0,777);
+        node.start();
     }
 }
