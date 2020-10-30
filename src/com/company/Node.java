@@ -5,9 +5,13 @@ import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
+// Message format: GUID Username Text
+// Connection request message format: 0-0-0-0-0 LocalHostInfo
+// Connection request accepted: 1-1-1-1-1 LocalHostInfo
+
 public class Node { // creates needed structures, initializes them, sends connection request(optionally), creates writing thread, handles income connection requests, receives and prints messages
 
-    byte[] buffer = new byte[1024];
+    private final byte[] buffer = new byte[1024];
     private final HashMap<String, Integer> nodeNeighbours = new HashMap<>(); // pairs IP / port
 
     private final String myNodeName;
@@ -33,25 +37,40 @@ public class Node { // creates needed structures, initializes them, sends connec
     }
 
     private void handleIncomingMessages(DatagramSocket socket) throws IOException {
-        DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
+        DatagramPacket receivedPacket = new DatagramPacket(buffer, buffer.length);
         while (true) {
-            socket.receive(packet);
-            String receivedMessage = new String(packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8);
+            socket.receive(receivedPacket);
+            String receivedMessage = new String(receivedPacket.getData(), 0, receivedPacket.getLength(), StandardCharsets.UTF_8);
             if (isConnectionRequest(receivedMessage)) {
-                handleConnectionRequest(socket, packet, receivedMessage);
-            } else System.out.println(receivedMessage); // replace GUID with "Username: "
+                handleConnectionRequest(socket, receivedPacket, receivedMessage);
+            } else {
+                String parsedMessage = receivedMessage.replace(receivedMessage.split(" ")[0] + " " + receivedMessage.split(" ")[1] + " ", receivedMessage.split(" ")[1] + ": ");
+                System.out.println(parsedMessage);
+
+                String bannedIp = receivedPacket.getAddress().toString().replace("/", "");
+                synchronized (nodeNeighbours) {
+                    for (Map.Entry<String, Integer> entry : nodeNeighbours.entrySet()) {
+                        if (!entry.getKey().equals(bannedIp)) {
+                            InetAddress inetAddress = InetAddress.getByName(entry.getKey().replace("/", ""));
+                            int port = entry.getValue();
+                            DatagramPacket sendPacket = new DatagramPacket(receivedMessage.getBytes(StandardCharsets.UTF_8), 0, receivedMessage.getBytes().length, inetAddress, port);
+                            socket.send(sendPacket);
+                        }
+                    }
+                }
+            }
         }
     }
 
     private void establishConnection(DatagramSocket socket, String connectToIp, int connectToPort) throws IOException {
-        String request = "0-0-0-0-0 " + myNodeName;
+        String request = "0-0-0-0-0 " + InetAddress.getLocalHost();
         byte[] buffer = request.getBytes(StandardCharsets.UTF_8);
         DatagramPacket requestPacket = new DatagramPacket(buffer, buffer.length, InetAddress.getByName(connectToIp), connectToPort);
         byte[] confirmationBuffer = new byte[128];
         DatagramPacket confirmationPacket = new DatagramPacket(confirmationBuffer, confirmationBuffer.length);
 
         socket.send(requestPacket);
-        socket.setSoTimeout(25);
+        socket.setSoTimeout(200);
         int i = 0;
         while (i < 3){
             socket.receive(confirmationPacket);
@@ -62,12 +81,13 @@ public class Node { // creates needed structures, initializes them, sends connec
             i++;
         }
         socket.setSoTimeout(0);
-        if (confirmationPacket.getLength() == 0){
+
+        if (confirmationPacket.getLength() == 0) {
             System.out.println("Unable to establish connection");
-        } else{
+        } else {
             String confirmationMessage = new String(confirmationPacket.getData(), 0, confirmationPacket.getLength(), StandardCharsets.UTF_8);
             nodeNeighbours.put(connectIp, connectPort);
-            System.out.println("Connection " + confirmationMessage.split(" ")[1] + " is established");
+            System.out.println("Connection with " + confirmationMessage.split(" ")[1] + " is established");
         }
     }
 
@@ -77,18 +97,18 @@ public class Node { // creates needed structures, initializes them, sends connec
     }
 
     private void handleConnectionRequest(DatagramSocket socket, DatagramPacket packet, String receivedMessage) throws IOException {
-        String confirmationMessage = "1-1-1-1-1 " + myNodeName;
+        String confirmationMessage = "1-1-1-1-1 " + InetAddress.getLocalHost();
         byte[] buffer = confirmationMessage.getBytes(StandardCharsets.UTF_8);
         DatagramPacket confirmationPacket = new DatagramPacket(buffer, buffer.length, packet.getAddress(), packet.getPort());
         socket.send(confirmationPacket);
 
         synchronized (nodeNeighbours){
-            String address = packet.getAddress().toString();
+            String address = packet.getAddress().toString().replace("/", "");
             if (!nodeNeighbours.containsKey(address)) {
                 nodeNeighbours.put(address, packet.getPort());
             }
         }
-        System.out.println("Connection with " + receivedMessage.split(" ")[1] + " is established");
+        System.out.println("Connection with " + receivedMessage.split(" ")[1] + " is established"); // может вывестись несколько раз
     }
 
     public void start() {
@@ -97,7 +117,7 @@ public class Node { // creates needed structures, initializes them, sends connec
                 establishConnection(socket, connectIp, connectPort);
             }
 
-            SendMessageHandler sendMessageHandler = new SendMessageHandler(socket, nodeNeighbours);
+            SendMessageHandler sendMessageHandler = new SendMessageHandler(socket, nodeNeighbours, myNodeName);
             new Thread(sendMessageHandler).start();
 
             handleIncomingMessages(socket);
@@ -110,10 +130,12 @@ public class Node { // creates needed structures, initializes them, sends connec
 class SendMessageHandler implements Runnable {
     private final DatagramSocket socket;
     final HashMap<String, Integer> nodeNeighbours;
+    private String nodeName;
 
-    SendMessageHandler(DatagramSocket socket, HashMap<String, Integer> nodeNeighbours) {
+    SendMessageHandler(DatagramSocket socket, HashMap<String, Integer> nodeNeighbours, String nodeName) {
         this.socket = socket;
         this.nodeNeighbours = nodeNeighbours;
+        this.nodeName = nodeName;
     }
 
     private void sendMessages() throws IOException {
@@ -122,7 +144,7 @@ class SendMessageHandler implements Runnable {
             String message = scanner.nextLine();
             if (!message.isEmpty() && (nodeNeighbours.size() > 0)) {
                 UUID uuid = UUID.randomUUID();
-                message = uuid.toString() + " " + message;
+                message = uuid.toString() + " " + nodeName + " " + message;
                 byte[] buf = message.getBytes(StandardCharsets.UTF_8);
                 synchronized (nodeNeighbours) {
                     for (Map.Entry<String, Integer> entry : nodeNeighbours.entrySet()) {
