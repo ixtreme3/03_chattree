@@ -291,7 +291,7 @@ class SendMessageHandler implements Runnable {
                             resendMessageList.add(new Message(uuid.toString(), message, inetAddress, port, LocalTime.now()));
                             if (Math.abs(ChronoUnit.SECONDS.between(LocalTime.now(), time)) >= 1) {
                                 UUID uuid1 = UUID.randomUUID();
-                                String replacementMessage = uuid1.toString() + " " + "2-2-2-2-2" +  FindReplacementHandler.message;
+                                String replacementMessage = uuid1.toString() + " " + "2-2-2-2-2" + " " + FindReplacementHandler.message;
                                 buf = replacementMessage.getBytes(StandardCharsets.UTF_8);
                                 packet = new DatagramPacket(buf, 0, buf.length, inetAddress, port);
                                 socket.send(packet);
